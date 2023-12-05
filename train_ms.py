@@ -138,17 +138,27 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
   net_g.train()
   net_d.train()
-  for batch_idx, (x, x_lengths, spec, spec_lengths, y, y_lengths, speakers) in enumerate(train_loader):
+  for batch_idx, (x, x_lengths, spec, spec_lengths, y, y_lengths, w2v, w2v_lengths, speakers) in enumerate(train_loader):
     x, x_lengths = x.cuda(rank, non_blocking=True), x_lengths.cuda(rank, non_blocking=True)
-    spec, spec_lengths = spec.cuda(rank, non_blocking=True), spec_lengths.cuda(rank, non_blocking=True)
+    w2v, spec, spec_lengths = w2v.cuda(rank, non_blocking=True), spec.cuda(rank, non_blocking=True),\
+                                    spec_lengths.cuda(rank, non_blocking=True)
+    w2v_lengths = w2v_lengths.cuda(rank, non_blocking=True)
     y, y_lengths = y.cuda(rank, non_blocking=True), y_lengths.cuda(rank, non_blocking=True)
     speakers = speakers.cuda(rank, non_blocking=True)
 
     with autocast(enabled=hps.train.fp16_run):
-      y_hat, l_length, attn, ids_slice, x_mask, z_mask,\
-      (z, z_p, m_p, logs_p, m_q, logs_q) = net_g(x, x_lengths, spec, spec_lengths, speakers)
+      real_mel = spec_to_mel_torch(
+          spec,
+          hps.data.filter_length,
+          hps.data.n_mel_channels,
+          hps.data.sampling_rate,
+          hps.data.mel_fmin,
+          hps.data.mel_fmax)
 
-      mel = spec
+      y_hat, l_length, attn, ids_slice, x_mask, z_mask,\
+      (z, z_p, m_p, logs_p, m_q, logs_q) = net_g(x, x_lengths, real_mel, spec_lengths, speakers)
+
+      mel = w2v
       y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
       y_hat_mel = y_hat.squeeze(1)
       y = commons.slice_segments(y, ids_slice * hps.data.hop_length, hps.train.segment_size) # slice 
@@ -210,7 +220,10 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
           scalars=scalar_dict)
 
       if global_step % hps.train.eval_interval == 0:
-        evaluate(hps, net_g, eval_loader, writer_eval)
+        try:
+            evaluate(hps, net_g, eval_loader, writer_eval)
+        except Exception as e:
+            print(f"Failed to run evaluate with {e}")
         utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, epoch, os.path.join(hps.model_dir, "G_{}.pth".format(global_step)))
         utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, epoch, os.path.join(hps.model_dir, "D_{}.pth".format(global_step)))
     global_step += 1
@@ -222,9 +235,10 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 def evaluate(hps, generator, eval_loader, writer_eval):
     generator.eval()
     with torch.no_grad():
-      for batch_idx, (x, x_lengths, spec, spec_lengths, y, y_lengths, speakers) in enumerate(eval_loader):
+      for batch_idx, (x, x_lengths, spec, spec_lengths, y, y_lengths, w2v, w2v_lengths, speakers) in enumerate(eval_loader):
         x, x_lengths = x.cuda(0), x_lengths.cuda(0)
         spec, spec_lengths = spec.cuda(0), spec_lengths.cuda(0)
+        w2v, w2v_lengths = w2v.cuda(0), w2v_lengths.cuda(0)
         y, y_lengths = y.cuda(0), y_lengths.cuda(0)
         speakers = speakers.cuda(0)
 
@@ -232,15 +246,21 @@ def evaluate(hps, generator, eval_loader, writer_eval):
         x = x[:1]
         x_lengths = x_lengths[:1]
         spec = spec[:1]
-        spec_lengths = spec_lengths[:1]
         y = y[:1]
         y_lengths = y_lengths[:1]
         speakers = speakers[:1]
+        mel = spec_to_mel_torch(
+            spec,
+            hps.data.filter_length,
+            hps.data.n_mel_channels,
+            hps.data.sampling_rate,
+            hps.data.mel_fmin,
+            hps.data.mel_fmax)
         break
-      y_hat, attn, mask, *_ = generator.module.infer(x, x_lengths, speakers, max_len=1000)
+      y_hat, attn, mask, *_ = generator.module.infer(x, x_lengths, mel, spec_lengths, max_len=1000)
       y_hat_lengths = mask.sum([1,2]).long() * hps.data.hop_length
 
-      mel = spec
+      mel = w2v
       y_hat_mel = y_hat.squeeze(1).float()
     image_dict = {
       "gen/mel": utils.plot_spectrogram_to_numpy(y_hat_mel[0].cpu().numpy())

@@ -436,9 +436,7 @@ class SynthesizerTrn(nn.Module):
 
       x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
 
-
       logw = self.dp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w)
-
 
       w = torch.exp(logw) * x_mask * length_scale
       w_ceil = torch.ceil(w)
