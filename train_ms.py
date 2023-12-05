@@ -46,10 +46,11 @@ def main():
 
   n_gpus = torch.cuda.device_count()
   os.environ['MASTER_ADDR'] = 'localhost'
-  os.environ['MASTER_PORT'] = '80000'
+  os.environ['MASTER_PORT'] = '8123'
 
   hps = utils.get_hparams()
-  mp.spawn(run, nprocs=n_gpus, args=(n_gpus, hps,))
+  run(0, n_gpus, hps)
+  # mp.spawn(run, nprocs=n_gpus, args=(n_gpus, hps,))
 
 
 def run(rank, n_gpus, hps):
@@ -65,7 +66,7 @@ def run(rank, n_gpus, hps):
   torch.manual_seed(hps.train.seed)
   torch.cuda.set_device(rank)
 
-  train_dataset = TextAudioSpeakerLoader(hps.data.training_files, hps.data)
+  train_dataset = TextAudioSpeakerLoader(hps.data.train_filelist_path, hps.data)
   train_sampler = DistributedBucketSampler(
       train_dataset,
       hps.train.batch_size,
@@ -77,16 +78,16 @@ def run(rank, n_gpus, hps):
   train_loader = DataLoader(train_dataset, num_workers=8, shuffle=False, pin_memory=True,
       collate_fn=collate_fn, batch_sampler=train_sampler)
   if rank == 0:
-    eval_dataset = TextAudioSpeakerLoader(hps.data.validation_files, hps.data)
+    eval_dataset = TextAudioSpeakerLoader(hps.data.test_filelist_path, hps.data)
     eval_loader = DataLoader(eval_dataset, num_workers=8, shuffle=False,
         batch_size=hps.train.batch_size, pin_memory=True,
         drop_last=False, collate_fn=collate_fn)
 
   net_g = SynthesizerTrn(
-      len(symbols),
+      # len(symbols),
       hps.data.filter_length // 2 + 1,
       hps.train.segment_size // hps.data.hop_length,
-      n_speakers=hps.data.n_speakers,
+      # n_speakers=hps.data.n_speakers,
       **hps.model).cuda(rank)
   net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(rank)
   optim_g = torch.optim.AdamW(
@@ -99,8 +100,8 @@ def run(rank, n_gpus, hps):
       hps.train.learning_rate, 
       betas=hps.train.betas, 
       eps=hps.train.eps)
-  net_g = DDP(net_g, device_ids=[rank])
-  net_d = DDP(net_d, device_ids=[rank])
+  # net_g = DDP(net_g, device_ids=[rank])
+  # net_d = DDP(net_d, device_ids=[rank])
 
   try:
     _, _, _, epoch_str = utils.load_checkpoint("models/G_1890000.pth", net_g, optim_g)

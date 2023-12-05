@@ -4,6 +4,7 @@ import random
 import numpy as np
 import torch
 import torch.utils.data
+import torch.nn.functional as F
 
 import commons 
 from mel_processing import spectrogram_torch
@@ -181,8 +182,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         random.shuffle(self.audiopaths_sid_text)
         self._filter()
         self.wav2vec = Wav2vec2()
-        if torch.cuda.is_available():
-            self.wav2vec.cuda()
+        # if torch.cuda.is_available():
+        #     self.wav2vec.cuda()
 
 
     def _filter(self):
@@ -223,14 +224,13 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
         spec_filename = filename.replace(".wav", ".wav2vec.pt")
 
-        y_pad = F.pad(source_audio, (40, 40), "reflect")
-
+        y_pad = F.pad(source_audio.unsqueeze(0), (40, 40), "reflect")
         if os.path.exists(spec_filename):
             y_w2v = torch.load(spec_filename)
         else:
-            y_w2v = self.wav2vec(y_pad.cuda())
+            y_w2v = self.wav2vec(y_pad)
             torch.save(y_w2v, spec_filename)
-        return y_w2v, audio_norm
+        return y_w2v.squeeze(0), audio_norm
 
     def get_text(self, text):
         if self.cleaned_text:

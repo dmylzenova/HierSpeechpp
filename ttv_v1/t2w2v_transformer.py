@@ -14,7 +14,7 @@ import math
 from ttv_v1.styleencoder import StyleEncoder
 import commons
 from ttv_v1.modules import WN
-import monotonic_align
+from ttv_v1 import monotonic_align
 
 
 def get_2d_padding(kernel_size: tp.Tuple[int, int], dilation: tp.Tuple[int, int] = (1, 1)):
@@ -390,7 +390,8 @@ class SynthesizerTrn(nn.Module):
       self.phoneme_classifier = Conv1d(inter_channels, 178, 1, bias=False)
 
 
-  def forward(self, x, x_lengths, y_mel, y_length):
+    def forward(self, x, x_lengths, y_mel, y_length, sp):
+      _ = sp
       y_mask = torch.unsqueeze(commons.sequence_mask(y_length, y_mel.size(2)), 1).to(y_mel.dtype)
 
       # Speaker embedding from mel (Style Encoder)
