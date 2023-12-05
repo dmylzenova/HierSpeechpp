@@ -6,7 +6,7 @@ import torch
 import torch.utils.data
 import torch.nn.functional as F
 
-import commons 
+import commons
 from mel_processing import spectrogram_torch
 from utils import load_wav_to_torch, load_filepaths_and_text
 from ttv_v1.text import text_to_sequence, cleaned_text_to_sequence
@@ -207,9 +207,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         # separate filename, speaker_id and text
         audiopath, sid, text = audiopath_sid_text[0], audiopath_sid_text[1], audiopath_sid_text[2]
         text = self.get_text(text)
-        spec, wav = self.get_audio(audiopath)
+        spec, wav, w2v = self.get_audio(audiopath)
         sid = self.get_sid(sid)
-        return (text, spec, wav, sid)
+        return (text, spec, wav, w2v, sid)
 
     def get_audio(self, filename):
         audio, sampling_rate = load_wav_to_torch(filename)
