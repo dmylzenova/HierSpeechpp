@@ -75,8 +75,6 @@ class TextAudioLoader(torch.utils.data.Dataset):
         p = (audio.shape[-1] // 1280 + 1) * 1280 - audio.shape[-1]
         source_audio = torch.nn.functional.pad(audio, (0, p), mode='constant').data
 
-        # audio_norm = audio / self.max_wav_value
-        # audio_norm = audio_norm.unsqueeze(0)
         spec_filename = filename.replace(".wav", ".wav2vec.pt")
 
         y_pad = F.pad(source_audio, (40, 40), "reflect")
@@ -84,8 +82,8 @@ class TextAudioLoader(torch.utils.data.Dataset):
         if os.path.exists(spec_filename):
             y_w2v = torch.load(spec_filename)
         else:
-            y_w2v = self.w2v(y_pad.cuda())
-            torch.save(spec, spec_filename)
+            y_w2v = self.wav2vec(y_pad.cuda())
+            torch.save(y_w2v, spec_filename)
         return y_w2v, audio_norm
 
     def get_text(self, text):
@@ -182,6 +180,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         random.seed(1234)
         random.shuffle(self.audiopaths_sid_text)
         self._filter()
+        self.wav2vec = Wav2vec2()
+        if torch.cuda.is_available():
+            self.wav2vec.cuda()
+
 
     def _filter(self):
         """
@@ -215,16 +217,20 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                 sampling_rate, self.sampling_rate))
         audio_norm = audio / self.max_wav_value
         audio_norm = audio_norm.unsqueeze(0)
-        spec_filename = filename.replace(".wav", ".spec.pt")
+
+        p = (audio.shape[-1] // 1280 + 1) * 1280 - audio.shape[-1]
+        source_audio = torch.nn.functional.pad(audio, (0, p), mode='constant').data
+
+        spec_filename = filename.replace(".wav", ".wav2vec.pt")
+
+        y_pad = F.pad(source_audio, (40, 40), "reflect")
+
         if os.path.exists(spec_filename):
-            spec = torch.load(spec_filename)
+            y_w2v = torch.load(spec_filename)
         else:
-            spec = spectrogram_torch(audio_norm, self.filter_length,
-                self.sampling_rate, self.hop_length, self.win_length,
-                center=False)
-            spec = torch.squeeze(spec, 0)
-            torch.save(spec, spec_filename)
-        return spec, audio_norm
+            y_w2v = self.wav2vec(y_pad.cuda())
+            torch.save(y_w2v, spec_filename)
+        return y_w2v, audio_norm
 
     def get_text(self, text):
         if self.cleaned_text:
