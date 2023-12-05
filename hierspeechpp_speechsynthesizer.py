@@ -18,6 +18,7 @@ import commons
 from alias_free_torch import *
 import activations
 
+
 class Wav2vec2(torch.nn.Module):
     def __init__(self, layer=7, w2v='mms'):
 

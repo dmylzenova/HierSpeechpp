@@ -14,6 +14,8 @@ import math
 from ttv_v1.styleencoder import StyleEncoder
 import commons
 from ttv_v1.modules import WN
+import monotonic_align
+
 
 def get_2d_padding(kernel_size: tp.Tuple[int, int], dilation: tp.Tuple[int, int] = (1, 1)):
     return (((kernel_size[0] - 1) * dilation[0]) // 2, ((kernel_size[1] - 1) * dilation[1]) // 2)
@@ -336,120 +338,156 @@ class PitchPredictor(nn.Module):
 
     return x
 class SynthesizerTrn(nn.Module):
-  """
-  Synthesizer for Training
-  """
+    """
+    Synthesizer for Training
+    """
 
-  def __init__(self,
+    def __init__(self,
 
-    spec_channels,
-    segment_size,
-    inter_channels,
-    hidden_channels,
-    filter_channels,
-    n_heads,
-    n_layers,
-    kernel_size,
-    p_dropout,
-    resblock,
-    resblock_kernel_sizes,
-    resblock_dilation_sizes,
-    gin_channels=256,
-    prosody_size=20,
-    cfg=False,
-    **kwargs):
+      spec_channels,
+      segment_size,
+      inter_channels,
+      hidden_channels,
+      filter_channels,
+      n_heads,
+      n_layers,
+      kernel_size,
+      p_dropout,
+      resblock,
+      resblock_kernel_sizes,
+      resblock_dilation_sizes,
+      gin_channels=256,
+      prosody_size=20,
+      cfg=False,
+      **kwargs):
 
-    super().__init__()
-    self.spec_channels = spec_channels
-    self.inter_channels = inter_channels
-    self.hidden_channels = hidden_channels
-    self.filter_channels = filter_channels
-    self.n_heads = n_heads
-    self.n_layers = n_layers
-    self.kernel_size = kernel_size
-    self.p_dropout = p_dropout
-    self.resblock = resblock
-    self.resblock_kernel_sizes = resblock_kernel_sizes
-    self.resblock_dilation_sizes = resblock_dilation_sizes
-    self.segment_size = segment_size
-    self.mel_size = prosody_size
+      super().__init__()
+      self.spec_channels = spec_channels
+      self.inter_channels = inter_channels
+      self.hidden_channels = hidden_channels
+      self.filter_channels = filter_channels
+      self.n_heads = n_heads
+      self.n_layers = n_layers
+      self.kernel_size = kernel_size
+      self.p_dropout = p_dropout
+      self.resblock = resblock
+      self.resblock_kernel_sizes = resblock_kernel_sizes
+      self.resblock_dilation_sizes = resblock_dilation_sizes
+      self.segment_size = segment_size
+      self.mel_size = prosody_size
 
-    self.enc_q = PosteriorEncoder(1024, inter_channels, hidden_channels, 5, 1, 16,  gin_channels=256)
-    self.enc_p = TextEncoder(178, out_channels=inter_channels, hidden_channels=inter_channels, filter_channels=inter_channels*4, 
-                                 n_heads=4, n_layers=3, kernel_size=9, p_dropout=0.2)
-    
-    self.flow = ResidualCouplingBlock_Transformer(inter_channels, hidden_channels, 5, 1, 3, gin_channels=256)
+      self.enc_q = PosteriorEncoder(1024, inter_channels, hidden_channels, 5, 1, 16,  gin_channels=256)
+      self.enc_p = TextEncoder(178, out_channels=inter_channels, hidden_channels=inter_channels, filter_channels=inter_channels*4,
+                                   n_heads=4, n_layers=3, kernel_size=9, p_dropout=0.2)
 
-    self.w2v_decoder = W2VDecoder(inter_channels, inter_channels*2, 5, 1, 8, output_size=1024, p_dropout=0.1, gin_channels=256)    
-    
-    self.emb_g = StyleEncoder(in_dim=80, hidden_dim=256, out_dim=256)
-    self.dp = StochasticDurationPredictor(inter_channels, inter_channels, 3, 0.5, 4, gin_channels=256)
-    self.pp = PitchPredictor()
-    self.phoneme_classifier = Conv1d(inter_channels, 178, 1, bias=False)
+      self.flow = ResidualCouplingBlock_Transformer(inter_channels, hidden_channels, 5, 1, 3, gin_channels=256)
 
-  @torch.no_grad()
-  def infer(self, x, x_lengths, y_mel, y_length, noise_scale=1, noise_scale_w=1, length_scale=1):
+      self.w2v_decoder = W2VDecoder(inter_channels, inter_channels*2, 5, 1, 8, output_size=1024, p_dropout=0.1, gin_channels=256)
 
-    y_mask = torch.unsqueeze(commons.sequence_mask(y_length, y_mel.size(2)), 1).to(y_mel.dtype)
-
-    # Speaker embedding from mel (Style Encoder)
-    g = self.emb_g(y_mel, y_mask).unsqueeze(-1)
-    
-    x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
+      self.emb_g = StyleEncoder(in_dim=80, hidden_dim=256, out_dim=256)
+      self.dp = StochasticDurationPredictor(inter_channels, inter_channels, 3, 0.5, 4, gin_channels=256)
+      self.pp = PitchPredictor()
+      self.phoneme_classifier = Conv1d(inter_channels, 178, 1, bias=False)
 
 
-    logw = self.dp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w)
+  def forward(self, x, x_lengths, y_mel, y_length):
+      y_mask = torch.unsqueeze(commons.sequence_mask(y_length, y_mel.size(2)), 1).to(y_mel.dtype)
 
-      
-    w = torch.exp(logw) * x_mask * length_scale
-    w_ceil = torch.ceil(w)
-    y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
-    y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, None), 1).to(x_mask.dtype)
-    attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
-    attn = commons.generate_path(w_ceil, attn_mask)
+      # Speaker embedding from mel (Style Encoder)
+      g = self.emb_g(y_mel, y_mask).unsqueeze(-1)
 
-    m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(1, 2) # [b, t', t], [b, t, d] -> [b, d, t']
-    logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(1, 2) # [b, t', t], [b, t, d] -> [b, d, t']
+      x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
 
-    z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
-    z = self.flow(z_p, y_mask, g=g, reverse=True)
+      z, m_q, logs_q, y_mask = self.enc_q(y_mel, y_length, g=g)
+      z_p = self.flow(z, y_mask, g=g)
 
-    w2v = self.w2v_decoder(z, y_mask, g=g)
-    pitch = self.pp(w2v, g)
+      with torch.no_grad():
+        # negative cross-entropy
+        s_p_sq_r = torch.exp(-2 * logs_p) # [b, d, t]
+        neg_cent1 = torch.sum(-0.5 * math.log(2 * math.pi) - logs_p, [1], keepdim=True) # [b, 1, t_s]
+        neg_cent2 = torch.matmul(-0.5 * (z_p ** 2).transpose(1, 2), s_p_sq_r) # [b, t_t, d] x [b, d, t_s] = [b, t_t, t_s]
+        neg_cent3 = torch.matmul(z_p.transpose(1, 2), (m_p * s_p_sq_r)) # [b, t_t, d] x [b, d, t_s] = [b, t_t, t_s]
+        neg_cent4 = torch.sum(-0.5 * (m_p ** 2) * s_p_sq_r, [1], keepdim=True) # [b, 1, t_s]
+        neg_cent = neg_cent1 + neg_cent2 + neg_cent3 + neg_cent4
 
-    return w2v, pitch
-  
-  @torch.no_grad()
-  def infer_noise_control(self, x, x_lengths, y_mel, y_length, noise_scale=0.333, noise_scale_w=1, length_scale=1, denoise_ratio = 0):
+        attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
+        attn = monotonic_align.maximum_path(neg_cent, attn_mask.squeeze(1)).unsqueeze(1).detach()
 
-    y_mask = torch.unsqueeze(commons.sequence_mask(y_length, y_mel.size(2)), 1).to(y_mel.dtype)
+      w = attn.sum(2)
+      l_length = self.dp(x, x_mask, w, g=g)
+      l_length = l_length / torch.sum(x_mask)
+      m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(1, 2)
+      logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(1, 2)
 
-    # Speaker embedding from mel (Style Encoder)
-    g = self.emb_g(y_mel, y_mask).unsqueeze(-1)
-    
-    g_org, g_denoise = g[:1, :, :], g[1:, :, :]
-    g = (1-denoise_ratio)*g_org + denoise_ratio*g_denoise
+      z_slice, ids_slice = commons.rand_slice_segments(z, y_length, self.segment_size)
 
-
-    x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
+      o = self.dec(z_slice, g=g)
+      return o, l_length, attn, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q)
 
 
-    logw = self.dp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w)
-      
-    w = torch.exp(logw) * x_mask * length_scale
-    w_ceil = torch.ceil(w)
-    y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
-    y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, None), 1).to(x_mask.dtype)
-    attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
-    attn = commons.generate_path(w_ceil, attn_mask)
+    @torch.no_grad()
+    def infer(self, x, x_lengths, y_mel, y_length, noise_scale=1, noise_scale_w=1, length_scale=1):
 
-    m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(1, 2) # [b, t', t], [b, t, d] -> [b, d, t']
-    logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(1, 2) # [b, t', t], [b, t, d] -> [b, d, t']
+      y_mask = torch.unsqueeze(commons.sequence_mask(y_length, y_mel.size(2)), 1).to(y_mel.dtype)
 
-    z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
-    z = self.flow(z_p, y_mask, g=g, reverse=True)
+      # Speaker embedding from mel (Style Encoder)
+      g = self.emb_g(y_mel, y_mask).unsqueeze(-1)
 
-    w2v = self.w2v_decoder(z, y_mask, g=g)
-    pitch = self.pp(w2v, g)
+      x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
 
-    return w2v, pitch
+
+      logw = self.dp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w)
+
+
+      w = torch.exp(logw) * x_mask * length_scale
+      w_ceil = torch.ceil(w)
+      y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
+      y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, None), 1).to(x_mask.dtype)
+      attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
+      attn = commons.generate_path(w_ceil, attn_mask)
+
+      m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(1, 2) # [b, t', t], [b, t, d] -> [b, d, t']
+      logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(1, 2) # [b, t', t], [b, t, d] -> [b, d, t']
+
+      z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
+      z = self.flow(z_p, y_mask, g=g, reverse=True)
+
+      w2v = self.w2v_decoder(z, y_mask, g=g)
+      pitch = self.pp(w2v, g)
+
+      return w2v, pitch
+
+    @torch.no_grad()
+    def infer_noise_control(self, x, x_lengths, y_mel, y_length, noise_scale=0.333, noise_scale_w=1, length_scale=1, denoise_ratio = 0):
+
+      y_mask = torch.unsqueeze(commons.sequence_mask(y_length, y_mel.size(2)), 1).to(y_mel.dtype)
+
+      # Speaker embedding from mel (Style Encoder)
+      g = self.emb_g(y_mel, y_mask).unsqueeze(-1)
+
+      g_org, g_denoise = g[:1, :, :], g[1:, :, :]
+      g = (1-denoise_ratio)*g_org + denoise_ratio*g_denoise
+
+
+      x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
+
+
+      logw = self.dp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w)
+
+      w = torch.exp(logw) * x_mask * length_scale
+      w_ceil = torch.ceil(w)
+      y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
+      y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, None), 1).to(x_mask.dtype)
+      attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
+      attn = commons.generate_path(w_ceil, attn_mask)
+
+      m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(1, 2) # [b, t', t], [b, t, d] -> [b, d, t']
+      logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(1, 2) # [b, t', t], [b, t, d] -> [b, d, t']
+
+      z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
+      z = self.flow(z_p, y_mask, g=g, reverse=True)
+
+      w2v = self.w2v_decoder(z, y_mask, g=g)
+      pitch = self.pp(w2v, g)
+
+      return w2v, pitch

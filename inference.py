@@ -48,7 +48,7 @@ def add_blank_token(text):
     return text_norm
 
 def tts(text, a, hierspeech):
-    
+
     net_g, text2w2v, speechsr, denoiser, mel_fn = hierspeech
 
     os.makedirs(a.output_dir, exist_ok=True)
@@ -60,7 +60,7 @@ def tts(text, a, hierspeech):
     audio, sample_rate = torchaudio.load(a.input_prompt)
 
     # support only single channel
-    audio = audio[:1,:] 
+    audio = audio[:1,:]
     # Resampling
     if sample_rate != 16000:
         audio = torchaudio.functional.resample(audio, sample_rate, 16000, resampling_method="kaiser_window") 
@@ -98,7 +98,7 @@ def tts(text, a, hierspeech):
         src_length = torch.LongTensor([w2v_x.size(2)]).cuda()  
         
         ## Pitch Clipping
-        pitch[pitch<torch.log(torch.tensor([55]).cuda())]  = 0
+        pitch[pitch < torch.log(torch.tensor([55]).cuda())] = 0
 
         ## Hierarchical Speech Synthesizer (W2V, F0 --> 16k Audio)
         converted_audio = \
@@ -113,7 +113,7 @@ def tts(text, a, hierspeech):
             converted_audio = converted_audio
 
     converted_audio = converted_audio.squeeze()
-    
+
     if a.scale_norm == 'prompt':
         converted_audio = converted_audio / (torch.abs(converted_audio).max()) * 32767.0 * prompt_audio_max
     else:
@@ -123,7 +123,7 @@ def tts(text, a, hierspeech):
 
     file_name2 = "{}.wav".format(file_name)
     output_file = os.path.join(a.output_dir, file_name2)
-    
+
     if a.output_sr == 48000:
         write(output_file, 48000, converted_audio)
     elif a.output_sr == 24000:
@@ -142,7 +142,7 @@ def model_load(a):
         n_mels=hps.data.n_mel_channels,
         window_fn=torch.hann_window
     ).cuda()
-    
+
     net_g = SynthesizerTrn(hps.data.filter_length // 2 + 1,
         hps.train.segment_size // hps.data.hop_length,
         **hps.model).cuda()
@@ -150,8 +150,8 @@ def model_load(a):
     _ = net_g.eval()
 
     text2w2v = Text2W2V(hps.data.filter_length // 2 + 1,
-    hps.train.segment_size // hps.data.hop_length,
-    **hps_t2w2v.model).cuda()
+                        hps.train.segment_size // hps.data.hop_length,
+                        **hps_t2w2v.model).cuda()
     text2w2v.load_state_dict(torch.load(a.ckpt_text2w2v))
     text2w2v.eval()
 
@@ -159,19 +159,21 @@ def model_load(a):
         speechsr = SpeechSR48(h_sr48.data.n_mel_channels,
             h_sr48.train.segment_size // h_sr48.data.hop_length,
             **h_sr48.model).cuda()
+        audiosr = speechsr
         utils.load_checkpoint(a.ckpt_sr48, audiosr, None)
         audiosr.eval()
-       
+
     elif a.output_sr == 24000:
         speechsr = SpeechSR24(h_sr.data.n_mel_channels,
         h_sr.train.segment_size // h_sr.data.hop_length,
         **h_sr.model).cuda()
+        audiosr = speechsr
         utils.load_checkpoint(a.ckpt_sr, audiosr, None)
         audiosr.eval()
-      
+
     else:
         audiosr = None
-    
+
     denoiser = MPNet(hps_denoiser).cuda()
     state_dict = load_checkpoint(a.denoiser_ckpt, device)
     denoiser.load_state_dict(state_dict['generator'])
@@ -179,8 +181,8 @@ def model_load(a):
     return net_g, text2w2v, speechsr, denoiser, mel_fn
 
 def inference(a):
-    
-    hierspeech = model_load(a) 
+
+    hierspeech = model_load(a)
     # Input Text 
     text = load_text(a.input_txt)
     # text = "hello I'm hierspeech"
@@ -196,8 +198,8 @@ def main():
     parser.add_argument('--output_dir', default='output')
     parser.add_argument('--ckpt', default='./logs/hierspeechpp_eng_kor/hierspeechpp_v2_ckpt.pth')
     parser.add_argument('--ckpt_text2w2v', '-ct', help='text2w2v checkpoint path', default='./logs/ttv_libritts_v1/ttv_lt960_ckpt.pth')
-    parser.add_argument('--ckpt_sr', type=str, default='./speechsr24k/G_340000.pth')  
-    parser.add_argument('--ckpt_sr48', type=str, default='./speechsr48k/G_100000.pth')  
+    parser.add_argument('--ckpt_sr', type=str, default='./speechsr24k/G_340000.pth')
+    parser.add_argument('--ckpt_sr48', type=str, default='./speechsr48k/G_100000.pth')
     parser.add_argument('--denoiser_ckpt', type=str, default='denoiser/g_best')
     parser.add_argument('--scale_norm', type=str, default='max')
     parser.add_argument('--output_sr', type=float, default=48000)
@@ -214,11 +216,12 @@ def main():
 
     hps = utils.get_hparams_from_file(os.path.join(os.path.split(a.ckpt)[0], 'config.json'))
     hps_t2w2v = utils.get_hparams_from_file(os.path.join(os.path.split(a.ckpt_text2w2v)[0], 'config.json'))
-    h_sr = utils.get_hparams_from_file(os.path.join(os.path.split(a.ckpt_sr)[0], 'config.json') )
-    h_sr48 = utils.get_hparams_from_file(os.path.join(os.path.split(a.ckpt_sr48)[0], 'config.json') )
+    h_sr = utils.get_hparams_from_file(os.path.join(os.path.split(a.ckpt_sr)[0], 'config.json'))
+    h_sr48 = utils.get_hparams_from_file(os.path.join(os.path.split(a.ckpt_sr48)[0], 'config.json'))
     hps_denoiser = utils.get_hparams_from_file(os.path.join(os.path.split(a.denoiser_ckpt)[0], 'config.json'))
 
     inference(a)
+
 
 if __name__ == '__main__':
     main()
