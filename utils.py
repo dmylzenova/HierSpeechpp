@@ -145,6 +145,9 @@ def get_hparams(init=True):
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', type=str, default="./configs/vctk.json",
                         help='JSON file for configuration')
+    parser.add_argument('-c2', '--config2', type=str, default="./configs/vctk.json",
+                        help='JSON file for configuration')
+
     parser.add_argument('-m', '--model', type=str, required=True,
                         help='Model name')
 
@@ -169,7 +172,22 @@ def get_hparams(init=True):
 
     hparams = HParams(**config)
     hparams.model_dir = model_dir
-    return hparams
+
+    config_path2 = args.config2
+    config_save_path2 = os.path.join(model_dir, "config2.json")
+    if init:
+        with open(config_path2, "r") as f:
+            data2 = f.read()
+        with open(config_save_path2, "w") as f:
+            f.write(data)
+    else:
+        with open(config_save_path2, "r") as f:
+            data2 = f.read()
+    config2 = json.loads(data2)
+
+    hparams2 = HParams(**config2)
+
+    return hparams, hparams2
 
 
 def get_hparams_from_dir(model_dir):

@@ -50,12 +50,13 @@ def main():
   os.environ['MASTER_ADDR'] = 'localhost'
   os.environ['MASTER_PORT'] = '8123'
 
-  hps = utils.get_hparams()
-  run(0, n_gpus, hps)
+  hps, hps_gen = utils.get_hparams()
+
+  run(0, n_gpus, hps, hps_gen)
   # mp.spawn(run, nprocs=n_gpus, args=(n_gpus, hps,))
 
 
-def run(rank, n_gpus, hps):
+def run(rank, n_gpus, hps, hps_gen):
   global global_step
   if rank == 0:
     logger = utils.get_logger(hps.model_dir)
@@ -92,10 +93,9 @@ def run(rank, n_gpus, hps):
       # n_speakers=hps.data.n_speakers,
       **hps.model).cuda(rank)
   audio_generator = Generator(
-      hps.data.filter_length // 2 + 1,
-      hps.train.segment_size // hps.data.hop_length,
-      # n_speakers=hps.data.n_speakers,
-      **hps.model).cuda(rank)
+      hps_gen.data.filter_length // 2 + 1,
+      hps_gen.train.segment_size // hps_gen.data.hop_length,
+      **hps_gen.model).cuda(rank)
   net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(rank)
   optim_g = torch.optim.AdamW(
       net_g.parameters(), 
