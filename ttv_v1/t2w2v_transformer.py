@@ -400,8 +400,8 @@ class SynthesizerTrn(nn.Module):
 
       x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
 
-      z, m_q, logs_q, y_mask = self.enc_q(w2v, w2v_mask, g=g)
-      z_p = self.flow(z, y_mask, g=g)
+      z, m_q, logs_q = self.enc_q(w2v, w2v_mask, g=g)
+      z_p = self.flow(z, w2v_mask, g=g)
 
       with torch.no_grad():
         # negative cross-entropy
