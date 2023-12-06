@@ -156,7 +156,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
           hps.data.mel_fmax)
 
       y_hat, l_length, attn, ids_slice, x_mask, z_mask,\
-      (z, z_p, m_p, logs_p, m_q, logs_q) = net_g(x, x_lengths, real_mel, spec_lengths, speakers)
+      (z, z_p, m_p, logs_p, m_q, logs_q) = net_g(x, x_lengths, real_mel, spec_lengths, w2v, w2v_lengths, speakers)
 
       mel = w2v
       y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)

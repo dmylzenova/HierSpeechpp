@@ -390,7 +390,7 @@ class SynthesizerTrn(nn.Module):
       self.phoneme_classifier = Conv1d(inter_channels, 178, 1, bias=False)
 
 
-    def forward(self, x, x_lengths, y_mel, y_length, sp):
+    def forward(self, x, x_lengths, y_mel, y_length, w2v, w2v_lengths, sp):
       _ = sp
       y_mask = torch.unsqueeze(commons.sequence_mask(y_length, y_mel.size(2)), 1).to(y_mel.dtype)
 
@@ -399,7 +399,7 @@ class SynthesizerTrn(nn.Module):
 
       x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
 
-      z, m_q, logs_q, y_mask = self.enc_q(y_mel, y_length, g=g)
+      z, m_q, logs_q, y_mask = self.enc_q(w2v, w2v_lengths, g=g)
       z_p = self.flow(z, y_mask, g=g)
 
       with torch.no_grad():
