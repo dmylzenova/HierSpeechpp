@@ -107,7 +107,10 @@ def run(rank, n_gpus, hps):
     _, _, _, epoch_str = utils.load_checkpoint("models/G_1890000.pth", net_g, optim_g)
     _, _, _, epoch_str = utils.load_checkpoint("models/D_1890000.pth", net_d, optim_d)
     global_step = (epoch_str - 1) * len(train_loader)
+    print("8" * 88)
+    print("Load from checkpoint epoch %d" % epoch_str)
   except:
+    print("0" * 88)
     epoch_str = 1
     global_step = 0
 
@@ -164,6 +167,9 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
       y = commons.slice_segments(y, ids_slice * hps.data.hop_length, hps.train.segment_size) # slice 
       print('yyyyyyy', y.shape)
       print('y haaaaat', y_hat.shape)
+
+      # Gen audio
+
 
       # Discriminator
       y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
