@@ -116,6 +116,7 @@ def run(rank, n_gpus, hps, hps_gen):
   # net_d = DDP(net_d, device_ids=[rank])
 
   try:
+    _, _, _, epoch_str_g = utils.load_checkpoint("pretrained_ttv/ttv_lt960_ckpt.pth", net_g, optim_g)
     _, _, _, epoch_str = utils.load_checkpoint("models/G_1890000.pth", audio_generator, optim_ag)
     _, _, _, epoch_str = utils.load_checkpoint("models/D_1890000.pth", net_d, optim_d)
     global_step = (epoch_str - 1) * len(train_loader)
@@ -126,24 +127,27 @@ def run(rank, n_gpus, hps, hps_gen):
     epoch_str = 1
     global_step = 0
 
-  scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)
+  scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str_g-2)
+  scheduler_ag = torch.optim.lr_scheduler.ExponentialLR(optim_ag, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)
   scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)
 
   scaler = GradScaler(enabled=hps.train.fp16_run)
 
   for epoch in range(epoch_str, hps.train.epochs + 1):
     if rank==0:
-      train_and_evaluate(rank, epoch, hps, [net_g, net_d], [optim_g, optim_d], [scheduler_g, scheduler_d], scaler, [train_loader, eval_loader], logger, [writer, writer_eval])
+      train_and_evaluate(rank, epoch, hps, [net_g, net_d, audio_generator], [optim_g, optim_d, optim_ag], [scheduler_g, scheduler_d, scheduler_ag],
+                         scaler, [train_loader, eval_loader], logger, [writer, writer_eval])
     else:
-      train_and_evaluate(rank, epoch, hps, [net_g, net_d], [optim_g, optim_d], [scheduler_g, scheduler_d], scaler, [train_loader, None], None, None)
+      train_and_evaluate(rank, epoch, hps, [net_g, net_d, audio_generator], [optim_g, optim_d, optim_ag], [scheduler_g, scheduler_d, scheduler_ag],
+                         scaler, [train_loader, None], None, None)
     scheduler_g.step()
     scheduler_d.step()
 
 
 def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loaders, logger, writers):
-  net_g, net_d = nets
-  optim_g, optim_d = optims
-  scheduler_g, scheduler_d = schedulers
+  net_g, net_d, audio_generator = nets
+  optim_g, optim_d, optim_ag = optims
+  scheduler_g, scheduler_d, scheduler_ag = schedulers
   train_loader, eval_loader = loaders
   if writers is not None:
     writer, writer_eval = writers
@@ -181,18 +185,18 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
       print('y haaaaat', y_hat.shape)
 
       # Gen audio
-
+      # audio_generator.infer(x_mel, w2v, length, f0))
 
       # Discriminator
-      y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
-      with autocast(enabled=False):
-        loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(y_d_hat_r, y_d_hat_g)
-        loss_disc_all = loss_disc
-    optim_d.zero_grad()
-    scaler.scale(loss_disc_all).backward()
-    scaler.unscale_(optim_d)
-    grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
-    scaler.step(optim_d)
+      # y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
+      # with autocast(enabled=False):
+      #   loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(y_d_hat_r, y_d_hat_g)
+      #   loss_disc_all = loss_disc
+    # optim_d.zero_grad()
+    # scaler.scale(loss_disc_all).backward()
+    # scaler.unscale_(optim_d)
+    # grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
+    # scaler.step(optim_d)
   
     with autocast(enabled=hps.train.fp16_run):
       # Generator
@@ -202,9 +206,11 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
         loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
         loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
 
-        loss_fm = feature_loss(fmap_r, fmap_g)
-        loss_gen, losses_gen = generator_loss(y_d_hat_g)
-        loss_gen_all = loss_gen + loss_fm + loss_mel + loss_dur + loss_kl
+        # loss_fm = feature_loss(fmap_r, fmap_g)
+        # loss_gen, losses_gen = generator_loss(y_d_hat_g)
+        # loss_gen_all = loss_gen + loss_fm + loss_mel + loss_dur + loss_kl
+        loss_gen_all = loss_mel + loss_dur + loss_kl
+
     optim_g.zero_grad()
     scaler.scale(loss_gen_all).backward()
     scaler.unscale_(optim_g)
@@ -215,18 +221,21 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     if rank == 0:
       if global_step % hps.train.log_interval == 0:
         lr = optim_g.param_groups[0]['lr']
-        losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_dur, loss_kl]
+        # losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_dur, loss_kl]
+        losses = [loss_mel, loss_dur, loss_kl]
         logger.info('Train Epoch: {} [{:.0f}%]'.format(
           epoch,
           100. * batch_idx / len(train_loader)))
         logger.info([x.item() for x in losses] + [global_step, lr])
         
-        scalar_dict = {"loss/g/total": loss_gen_all, "loss/d/total": loss_disc_all, "learning_rate": lr, "grad_norm_d": grad_norm_d, "grad_norm_g": grad_norm_g}
-        scalar_dict.update({"loss/g/fm": loss_fm, "loss/g/mel": loss_mel, "loss/g/dur": loss_dur, "loss/g/kl": loss_kl})
+        # scalar_dict = {"loss/g/total": loss_gen_all, "loss/d/total": loss_disc_all, "learning_rate": lr, "grad_norm_d": grad_norm_d, "grad_norm_g": grad_norm_g}
+        # scalar_dict.update({"loss/g/fm": loss_fm, "loss/g/mel": loss_mel, "loss/g/dur": loss_dur, "loss/g/kl": loss_kl})
+        scalar_dict = {"loss/g/total": loss_gen_all, "learning_rate": lr, "grad_norm_g": grad_norm_g}
+        scalar_dict.update({"loss/g/mel": loss_mel, "loss/g/dur": loss_dur, "loss/g/kl": loss_kl})
 
-        scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
-        scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
-        scalar_dict.update({"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)})
+        # scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
+        # scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
+        # scalar_dict.update({"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)})
         image_dict = { 
             "slice/mel_org": utils.plot_spectrogram_to_numpy(y_mel[0].data.cpu().numpy()),
             "slice/mel_gen": utils.plot_spectrogram_to_numpy(y_hat_mel[0].data.cpu().numpy()), 
