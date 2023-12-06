@@ -117,13 +117,16 @@ def run(rank, n_gpus, hps, hps_gen):
 
   try:
     _, _, _, epoch_str_g = utils.load_checkpoint("pretrained_ttv/ttv_lt960_ckpt.pth", net_g, optim_g)
-    _, _, _, epoch_str = utils.load_checkpoint("models/G_1890000.pth", audio_generator, optim_ag)
-    _, _, _, epoch_str = utils.load_checkpoint("models/D_1890000.pth", net_d, optim_d)
+    # _, _, _, epoch_str = utils.load_checkpoint("models/G_1890000.pth", audio_generator, optim_ag)
+    # _, _, _, epoch_str = utils.load_checkpoint("models/D_1890000.pth", net_d, optim_d)
     global_step = (epoch_str - 1) * len(train_loader)
     print("8" * 88)
     print("Load from checkpoint epoch %d" % epoch_str)
-  except:
+  except Exception as e:
     print("0" * 88)
+    print(e)
+    print("0" * 88)
+    epoch_str_g = 1
     epoch_str = 1
     global_step = 0
 
@@ -200,7 +203,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
   
     with autocast(enabled=hps.train.fp16_run):
       # Generator
-      y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
+      # y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
       with autocast(enabled=False):
         loss_dur = torch.sum(l_length.float())
         loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
