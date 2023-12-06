@@ -423,7 +423,7 @@ class SynthesizerTrn(nn.Module):
 
       z_slice, ids_slice = commons.rand_slice_segments(z, y_length, self.segment_size)
 
-      o = self.w2v_decoder(z_slice, g=g)
+      o = self.w2v_decoder(z_slice, w2v_mask, g=g)
       # pitch = self.pp(o, g)
 
       return o, l_length, attn, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q)
