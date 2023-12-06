@@ -24,6 +24,8 @@ from ttv_v1.t2w2v_transformer import (
     SynthesizerTrn,
 )
 
+from hierspeechpp_speechsynthesizer import SynthesizerTrn as Generator
+
 from hierspeechpp_speechsynthesizer import MultiPeriodDiscriminator
 
 from losses import (
@@ -89,11 +91,21 @@ def run(rank, n_gpus, hps):
       hps.train.segment_size // hps.data.hop_length,
       # n_speakers=hps.data.n_speakers,
       **hps.model).cuda(rank)
+  audio_generator = Generator(
+      hps.data.filter_length // 2 + 1,
+      hps.train.segment_size // hps.data.hop_length,
+      # n_speakers=hps.data.n_speakers,
+      **hps.model).cuda(rank)
   net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(rank)
   optim_g = torch.optim.AdamW(
       net_g.parameters(), 
       hps.train.learning_rate, 
       betas=hps.train.betas, 
+      eps=hps.train.eps)
+  optim_ag = torch.optim.AdamW(
+      audio_generator.parameters(),
+      hps.train.learning_rate,
+      betas=hps.train.betas,
       eps=hps.train.eps)
   optim_d = torch.optim.AdamW(
       net_d.parameters(),
@@ -104,7 +116,7 @@ def run(rank, n_gpus, hps):
   # net_d = DDP(net_d, device_ids=[rank])
 
   try:
-    _, _, _, epoch_str = utils.load_checkpoint("models/G_1890000.pth", net_g, optim_g)
+    _, _, _, epoch_str = utils.load_checkpoint("models/G_1890000.pth", audio_generator, optim_ag)
     _, _, _, epoch_str = utils.load_checkpoint("models/D_1890000.pth", net_d, optim_d)
     global_step = (epoch_str - 1) * len(train_loader)
     print("8" * 88)
