@@ -424,9 +424,9 @@ class SynthesizerTrn(nn.Module):
       z_slice, ids_slice = commons.rand_slice_segments(z, w2v_lengths, self.segment_size)
       print(z.shape, w2v_mask.shape)
       o = self.w2v_decoder(z, w2v_mask, g=g)
-      # pitch = self.pp(o, g)
+      pitch = self.pp(o, g)
 
-      return o, l_length, attn, ids_slice, x_mask, w2v_mask, (z, z_p, m_p, logs_p, m_q, logs_q)
+      return o, l_length, attn, ids_slice, x_mask, w2v_mask, pitch, (z, z_p, m_p, logs_p, m_q, logs_q)
 
 
     @torch.no_grad()

@@ -100,6 +100,8 @@ def plot_spectrogram_to_numpy(spectrogram):
     plt.close()
     return data
 
+# def plot_pitch():
+
 
 def plot_alignment_to_numpy(alignment, info=None):
     global MATPLOTLIB_FLAG

@@ -5,6 +5,8 @@ import numpy as np
 import torch
 import torch.utils.data
 import torch.nn.functional as F
+import amfm_decompy.pYAAPT as pYAAPT
+import amfm_decompy.basic_tools as basic
 
 import commons
 from mel_processing import spectrogram_torch
@@ -185,6 +187,27 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         # if torch.cuda.is_available():
         #     self.wav2vec.cuda()
 
+    def _get_pitch(self, audio, interp=False):
+        audio = audio.reshape(1, -1)
+        frame_length = 20.0
+        to_pad = int(frame_length / 1000 * self.sampling_rate) // 2
+
+        f0s = []
+        for y in audio.astype(np.float64):
+            y_pad = np.pad(y.squeeze(), (to_pad, to_pad), "constant", constant_values=0)
+            print(y_pad)
+
+            signal = basic.SignalObj(y_pad, self.sampling_rate)
+            pitch = pYAAPT.yaapt(signal, **{'frame_length': frame_length, 'frame_space': 5.0, 'nccf_thresh1': 0.25,
+                                            'tda_frame_length': 25.0})
+            if interp:
+                f0s += [pitch.samp_interp[None, None, :]]
+            else:
+                f0s += [pitch.samp_values[None, None, :]]
+
+        f0 = np.vstack(f0s)
+        f0 = np.log1p(f0)
+        return f0.squeeze(0)
 
     def _filter(self):
         """
@@ -207,9 +230,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         # separate filename, speaker_id and text
         audiopath, sid, text = audiopath_sid_text[0], audiopath_sid_text[1], audiopath_sid_text[2]
         text = self.get_text(text)
-        spec, wav, w2v = self.get_audio(audiopath)
+        spec, wav, w2v, f0 = self.get_audio(audiopath)
         sid = self.get_sid(sid)
-        return (text, spec, wav, w2v, sid)
+        return (text, spec, wav, w2v, f0, sid)
 
     def get_audio(self, filename):
         audio, sampling_rate = load_wav_to_torch(filename)
@@ -240,7 +263,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         else:
             y_w2v = self.wav2vec(y_pad)
             torch.save(y_w2v, w2v_filename)
-        return spec, audio_norm, y_w2v.squeeze(0)
+        f0 = self._get_pitch(audio)
+        return spec, audio_norm, y_w2v.squeeze(0), f0
 
     def get_text(self, text):
         if self.cleaned_text:
@@ -284,21 +308,26 @@ class TextAudioSpeakerCollate():
         max_spec_len = max([x[1].size(1) for x in batch])
         max_wav_len = max([x[2].size(1) for x in batch])
         max_w2v_len = max([x[3].size(1) for x in batch])
+        max_f0_len = max([x[5].size(1) for x in batch])
 
         text_lengths = torch.LongTensor(len(batch))
         spec_lengths = torch.LongTensor(len(batch))
         wav_lengths = torch.LongTensor(len(batch))
         sid = torch.LongTensor(len(batch))
         w2v_lengths = torch.LongTensor(len(batch))
+        f0_lengths = torch.LongTensor(len(batch))
 
         text_padded = torch.LongTensor(len(batch), max_text_len)
         spec_padded = torch.FloatTensor(len(batch), batch[0][1].size(0), max_spec_len)
         wav_padded = torch.FloatTensor(len(batch), 1, max_wav_len)
         w2v_padded = torch.FloatTensor(len(batch), batch[0][3].size(0), max_w2v_len)
+        f0_padded = torch.FloatTensor(len(batch), 1, max_f0_len)
+
         text_padded.zero_()
         spec_padded.zero_()
         wav_padded.zero_()
         w2v_padded.zero_()
+        f0_padded.zero_()
         for i in range(len(ids_sorted_decreasing)):
             row = batch[ids_sorted_decreasing[i]]
 
@@ -320,9 +349,14 @@ class TextAudioSpeakerCollate():
 
             sid[i] = row[4]
 
+            f0 = row[5]
+            f0_padded[i, :, :f0.size(1)] = f0
+
         if self.return_ids:
-            return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, w2v_padded, w2v_lengths, sid, ids_sorted_decreasing
-        return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, w2v_padded, w2v_lengths, sid
+            return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, w2v_padded, \
+                   w2v_lengths, f0_padded, sid, ids_sorted_decreasing
+        return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, w2v_padded,\
+               w2v_lengths, f0_padded, sid
 
 
 class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
