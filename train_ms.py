@@ -116,7 +116,10 @@ def run(rank, n_gpus, hps, hps_gen):
   # net_d = DDP(net_d, device_ids=[rank])
 
   try:
-    _, _, _, epoch_str_g = utils.load_checkpoint("pretrained_ttv/ttv_lt960_ckpt.pth", net_g, optim_g)
+    net_g.load_state_dict(torch.load("pretrained_ttv/ttv_lt960_ckpt.pth"))
+    epoch_str_g = 1
+    epoch_str = 1
+    # _, _, _, epoch_str_g = utils.load_checkpoint("pretrained_ttv/ttv_lt960_ckpt.pth", net_g, optim_g)
     # _, _, _, epoch_str = utils.load_checkpoint("models/G_1890000.pth", audio_generator, optim_ag)
     # _, _, _, epoch_str = utils.load_checkpoint("models/D_1890000.pth", net_d, optim_d)
     global_step = (epoch_str - 1) * len(train_loader)
@@ -181,9 +184,10 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
       (z, z_p, m_p, logs_p, m_q, logs_q) = net_g(x, x_lengths, real_mel, spec_lengths, w2v, w2v_lengths, speakers)
 
       mel = w2v
-      y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
+      # y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
+      y_mel = mel
       y_hat_mel = y_hat.squeeze(1)
-      y = commons.slice_segments(y, ids_slice * hps.data.hop_length, hps.train.segment_size) # slice 
+      # y = commons.slice_segments(y, ids_slice * hps.data.hop_length, hps.train.segment_size) # slice 
       print('yyyyyyy', y.shape)
       print('y haaaaat', y_hat.shape)
 

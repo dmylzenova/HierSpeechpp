@@ -422,8 +422,8 @@ class SynthesizerTrn(nn.Module):
       logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(1, 2)
 
       z_slice, ids_slice = commons.rand_slice_segments(z, w2v_lengths, self.segment_size)
-
-      o = self.w2v_decoder(z_slice, w2v_mask, g=g)
+      print(z.shape, w2v_mask.shape)
+      o = self.w2v_decoder(z, w2v_mask, g=g)
       # pitch = self.pp(o, g)
 
       return o, l_length, attn, ids_slice, x_mask, w2v_mask, (z, z_p, m_p, logs_p, m_q, logs_q)
