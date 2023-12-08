@@ -188,8 +188,8 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
       y_mel = mel
       y_hat_mel = y_hat.squeeze(1)
       # y = commons.slice_segments(y, ids_slice * hps.data.hop_length, hps.train.segment_size) # slice 
-      print('yyyyyyy', y.shape)
-      print('y haaaaat', y_hat.shape)
+      # print('yyyyyyy', y.shape)
+      # print('y haaaaat', y_hat.shape)
 
       # Gen audio
       # audio_generator.infer(x_mel, w2v, length, f0))
