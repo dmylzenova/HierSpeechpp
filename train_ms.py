@@ -170,7 +170,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     w2v_lengths = w2v_lengths.cuda(rank, non_blocking=True)
     y, y_lengths = y.cuda(rank, non_blocking=True), y_lengths.cuda(rank, non_blocking=True)
     speakers = speakers.cuda(rank, non_blocking=True)
-
+    f0_target = f0_target.cuda(rank, non_blocking=True)
     with autocast(enabled=hps.train.fp16_run):
       real_mel = spec_to_mel_torch(
           spec,
@@ -215,11 +215,13 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
         print('f0_pred', f0_pred.shape)
         print('f0_target', f0_target.shape)
         print("=========")
-        loss_f0 = F.ls_loss(f0_pred, f0_target)
+        loss_f0 = F.l1_loss(f0_pred, f0_target)
+        print('lossf0', loss_f0)
         # loss_fm = feature_loss(fmap_r, fmap_g)
         # loss_gen, losses_gen = generator_loss(y_d_hat_g)
         # loss_gen_all = loss_gen + loss_fm + loss_mel + loss_dur + loss_kl
         loss_gen_all = loss_mel + loss_dur + loss_kl + loss_f0
+        print('loss_gen_all', loss_gen_all)
 
     optim_g.zero_grad()
     scaler.scale(loss_gen_all).backward()
@@ -265,7 +267,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
         except Exception as e:
             print(f"Failed to run evaluate with {e}")
         utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, epoch, os.path.join(hps.model_dir, "G_{}.pth".format(global_step)))
-        utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, epoch, os.path.join(hps.model_dir, "D_{}.pth".format(global_step)))
+        # utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, epoch, os.path.join(hps.model_dir, "D_{}.pth".format(global_step)))
     global_step += 1
   
   if rank == 0:

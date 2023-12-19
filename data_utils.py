@@ -188,14 +188,14 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         #     self.wav2vec.cuda()
 
     def _get_pitch(self, audio, interp=False):
+        audio = audio.numpy()
         audio = audio.reshape(1, -1)
+    
         frame_length = 20.0
         to_pad = int(frame_length / 1000 * self.sampling_rate) // 2
-
         f0s = []
         for y in audio.astype(np.float64):
             y_pad = np.pad(y.squeeze(), (to_pad, to_pad), "constant", constant_values=0)
-            print(y_pad)
 
             signal = basic.SignalObj(y_pad, self.sampling_rate)
             pitch = pYAAPT.yaapt(signal, **{'frame_length': frame_length, 'frame_space': 5.0, 'nccf_thresh1': 0.25,
@@ -207,7 +207,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
         f0 = np.vstack(f0s)
         f0 = np.log1p(f0)
-        return f0.squeeze(0)
+        return torch.tensor(f0.squeeze(0)[:, :-1])
 
     def _filter(self):
         """
@@ -263,7 +263,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         else:
             y_w2v = self.wav2vec(y_pad)
             torch.save(y_w2v, w2v_filename)
-        f0 = self._get_pitch(audio)
+        # print('eee', y_w2v.shape, y_pad.shape)
+        f0 = self._get_pitch(y_pad)
+        # print('eee', y_w2v.shape, y_pad.shape,  f0.shape)
         return spec, audio_norm, y_w2v.squeeze(0), f0
 
     def get_text(self, text):
@@ -308,7 +310,7 @@ class TextAudioSpeakerCollate():
         max_spec_len = max([x[1].size(1) for x in batch])
         max_wav_len = max([x[2].size(1) for x in batch])
         max_w2v_len = max([x[3].size(1) for x in batch])
-        max_f0_len = max([x[5].size(1) for x in batch])
+        max_f0_len = max([x[4].size(1) for x in batch])
 
         text_lengths = torch.LongTensor(len(batch))
         spec_lengths = torch.LongTensor(len(batch))
@@ -347,9 +349,9 @@ class TextAudioSpeakerCollate():
             w2v_padded[i, :, :w2v.size(1)] = w2v
             w2v_lengths[i] = w2v.size(1)
 
-            sid[i] = row[4]
+            sid[i] = row[5]
 
-            f0 = row[5]
+            f0 = row[4]
             f0_padded[i, :, :f0.size(1)] = f0
 
         if self.return_ids:
